@@ -1,0 +1,99 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  NAMESPACE: "lab"
+  APP_NAME: "iac-sdd-app"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+
+      - name: Run Tests
+        working-directory: ./app
+        run: go test -v ./...
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Configure Environment
+        run: |
+          if [ "${{ github.ref_type }}" == "tag" ]; then
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=latest" >> $GITHUB_ENV
+          fi
+
+          if [ -n "${{ secrets.REGISTRY_URL }}" ]; then
+            echo "REGISTRY_URL=${{ secrets.REGISTRY_URL }}" >> $GITHUB_ENV
+            echo "REGISTRY_USER=${{ secrets.REGISTRY_USERNAME }}" >> $GITHUB_ENV
+            echo "REGISTRY_PASS=${{ secrets.REGISTRY_PASSWORD }}" >> $GITHUB_ENV
+            echo "IMAGE_NAME=${{ secrets.REGISTRY_URL }}/${{ env.APP_NAME }}" >> $GITHUB_ENV
+            
+            echo "TF_REG_SERVER=${{ secrets.REGISTRY_URL }}" >> $GITHUB_ENV
+            echo "TF_REG_USER=${{ secrets.REGISTRY_USERNAME }}" >> $GITHUB_ENV
+            echo "TF_REG_PASS=${{ secrets.REGISTRY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            echo "REGISTRY_URL=ghcr.io" >> $GITHUB_ENV
+            echo "REGISTRY_USER=${{ github.actor }}" >> $GITHUB_ENV
+            echo "REGISTRY_PASS=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
+            
+            OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            echo "IMAGE_NAME=ghcr.io/$OWNER/${{ env.APP_NAME }}" >> $GITHUB_ENV
+            
+            echo "TF_REG_SERVER=" >> $GITHUB_ENV
+            echo "TF_REG_USER=" >> $GITHUB_ENV
+            echo "TF_REG_PASS=" >> $GITHUB_ENV
+          fi
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY_URL }}
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASS }}
+
+      - name: Build Docker Image
+        working-directory: ./app
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} .
+      
+      - name: Push Docker Image
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Inject Kubeconfig
+        working-directory: ./terraform
+        run: |
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 -d > kubeconfig.yaml
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve -var="app_image=${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }}" -var="namespace=${{ env.NAMESPACE }}" -var="registry_server=${{ env.TF_REG_SERVER }}" -var="registry_username=${{ env.TF_REG_USER }}" -var="registry_password=${{ env.TF_REG_PASS }}"

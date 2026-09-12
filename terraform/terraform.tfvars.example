@@ -1,0 +1,29 @@
+# =====================================================================
+# Terraform variables template
+# =====================================================================
+# INSTRUCTIONS: 
+# 1. Copy this file and rename it to "terraform.tfvars".
+# 2. Replace the values with your actual configuration.
+# 3. The "terraform.tfvars" file will be ignored by Git for security.
+
+# -------------------------
+# Base Configuration
+# -------------------------
+# Path to the Kubeconfig file (usually injected by CI/CD or stored locally)
+kubeconfig_path = "kubeconfig.yaml"
+
+# Kubernetes namespace where resources will be deployed (e.g. "default", "production", "lab")
+namespace       = "default"
+
+# -------------------------
+# Image and Registry
+# -------------------------
+# Full name of the Docker image to deploy
+app_image       = "my-registry.com/my-user/my-app:latest"
+
+# (Optional) Registry URL if it is private (e.g. "cr.corp.com" or "ghcr.io")
+registry_server   = ""
+
+# (Optional) Credentials to access the private registry
+registry_username = ""
+registry_password = ""

@@ -1,0 +1,11 @@
+services:
+  app:
+    image: ${APP_IMAGE:-iac-sdd-app:local}
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - HOSTNAME=${HOSTNAME:-localhost}
