@@ -129,6 +129,9 @@ resource "kubernetes_service" "app" {
     name      = "iac-sdd-app-svc"
     namespace = var.namespace
   }
+  
+  wait_for_load_balancer = false
+  
   spec {
     selector = {
       app = "iac-sdd-app"
