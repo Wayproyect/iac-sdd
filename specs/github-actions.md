@@ -12,17 +12,22 @@ Automate the building of the application's Docker image and its subsequent deplo
 
 ## 3. Workflow Phases (Jobs)
 
-### 3.1. Tests (Test)
+### 3.1. Tests (`test`)
 - **Behavior:** Run `go test -v ./...` inside the `app/` folder.
+- **Caching:** The Go setup action must use `cache-dependency-path: app/go.mod` since the Go code is located in a subdirectory.
 
-### 3.2. Image Build (Build & Push)
+### 3.2. Image Build (`build`)
+- **Behavior:** Build the Docker image from `app/Dockerfile`.
+- **Artifacts:** Save the built image to a `.tar` file using `docker save` and upload it as a GitHub Actions artifact (e.g., using `actions/upload-artifact@v7`). This ensures the exact same image is used in subsequent jobs without rebuilding.
+
+### 3.3. Image Publish (`publish`)
+- **Artifacts:** Download the previously saved image artifact (e.g., using `actions/download-artifact@v8`) and load it using `docker load`.
 - **Dynamic Registry Selection & Authentication:** The workflow must determine the target registry dynamically based on the presence of the `REGISTRY_URL` secret.
   - **Custom Registry (if `REGISTRY_URL` exists):** Authenticate using `REGISTRY_USERNAME` and `REGISTRY_PASSWORD`. The image name will be `${REGISTRY_URL}/${APP_NAME}`.
   - **GitHub Container Registry (Fallback default):** If no secret is provided, default to `ghcr.io`. Authenticate using `${{ github.actor }}` and `${{ secrets.GITHUB_TOKEN }}`. The image name will be `ghcr.io/<owner_lowercase>/${APP_NAME}`.
-- **Behavior:** Build the image from `app/Dockerfile`.
 - **Tagging and Pushing:** Tag the image using the dynamically resolved image name and the triggered `<TAG>` (e.g., `v1.0.0`), and push it to the selected registry.
 
-### 3.3. Deployment (Deploy)
+### 3.4. Deployment (`deploy`)
 - **Credentials and Variables Injection:**
   - `KUBECONFIG_DATA`: Secret containing the K3s Kubeconfig file in Base64.
   - `APP_NAME`: Workflow environment variable defining the application name (e.g., `iac-sdd-app`).
@@ -35,6 +40,7 @@ Automate the building of the application's Docker image and its subsequent deplo
 
 ## 4. Acceptance Criteria
 1. Pushing a tag (e.g., `v1.0.0`) triggers the workflow automatically.
-2. If `REGISTRY_URL` is omitted, the image is successfully published to GHCR.
-3. If `REGISTRY_URL` is provided, the image is published to the custom registry and Terraform is supplied with the matching credentials.
-4. Terraform applies the changes dynamically by connecting to the K3s API and updating the Deployment with the newly generated image tag.
+2. The workflow runs in 4 distinct stages (`test`, `build`, `publish`, `deploy`), allowing independent restarts of any failed stage.
+3. If `REGISTRY_URL` is omitted, the image is successfully published to GHCR.
+4. If `REGISTRY_URL` is provided, the image is published to the custom registry and Terraform is supplied with the matching credentials.
+5. Terraform applies the changes dynamically by connecting to the K3s API and updating the Deployment with the newly generated image tag.
