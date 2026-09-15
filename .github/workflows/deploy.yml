@@ -26,8 +26,61 @@ jobs:
         working-directory: ./app
         run: go test -v ./...
 
-  build-and-deploy:
+  build:
     needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Configure Environment
+        run: |
+          if [ "${{ github.ref_type }}" == "tag" ]; then
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=latest" >> $GITHUB_ENV
+          fi
+
+          if [ -n "${{ secrets.REGISTRY_URL }}" ]; then
+            echo "REGISTRY_URL=${{ secrets.REGISTRY_URL }}" >> $GITHUB_ENV
+            echo "REGISTRY_USER=${{ secrets.REGISTRY_USERNAME }}" >> $GITHUB_ENV
+            echo "REGISTRY_PASS=${{ secrets.REGISTRY_PASSWORD }}" >> $GITHUB_ENV
+            echo "IMAGE_NAME=${{ secrets.REGISTRY_URL }}/${{ env.APP_NAME }}" >> $GITHUB_ENV
+            
+            echo "TF_REG_SERVER=${{ secrets.REGISTRY_URL }}" >> $GITHUB_ENV
+            echo "TF_REG_USER=${{ secrets.REGISTRY_USERNAME }}" >> $GITHUB_ENV
+            echo "TF_REG_PASS=${{ secrets.REGISTRY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            echo "REGISTRY_URL=ghcr.io" >> $GITHUB_ENV
+            echo "REGISTRY_USER=${{ github.actor }}" >> $GITHUB_ENV
+            echo "REGISTRY_PASS=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
+            
+            OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            echo "IMAGE_NAME=ghcr.io/$OWNER/${{ env.APP_NAME }}" >> $GITHUB_ENV
+            
+            echo "TF_REG_SERVER=" >> $GITHUB_ENV
+            echo "TF_REG_USER=" >> $GITHUB_ENV
+            echo "TF_REG_PASS=" >> $GITHUB_ENV
+          fi
+
+      - name: Build Docker Image
+        working-directory: ./app
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} .
+
+      - name: Save Docker Image
+        run: |
+          docker save ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} > image.tar
+
+      - name: Upload Docker Image
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-image
+          path: image.tar
+          retention-days: 1
+
+  publish:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,21 +119,62 @@ jobs:
             echo "TF_REG_PASS=" >> $GITHUB_ENV
           fi
 
+      - name: Download Docker Image
+        uses: actions/download-artifact@v8
+        with:
+          name: docker-image
+
+      - name: Load Docker Image
+        run: |
+          docker load -i image.tar
+
       - name: Login to Docker Registry
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY_URL }}
           username: ${{ env.REGISTRY_USER }}
           password: ${{ env.REGISTRY_PASS }}
-
-      - name: Build Docker Image
-        working-directory: ./app
-        run: |
-          docker build -t ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} .
       
       - name: Push Docker Image
         run: |
           docker push ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }}
+
+  deploy:
+    needs: publish
+    runs-on: gh-actions-runner
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Configure Environment
+        run: |
+          if [ "${{ github.ref_type }}" == "tag" ]; then
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=latest" >> $GITHUB_ENV
+          fi
+
+          if [ -n "${{ secrets.REGISTRY_URL }}" ]; then
+            echo "REGISTRY_URL=${{ secrets.REGISTRY_URL }}" >> $GITHUB_ENV
+            echo "REGISTRY_USER=${{ secrets.REGISTRY_USERNAME }}" >> $GITHUB_ENV
+            echo "REGISTRY_PASS=${{ secrets.REGISTRY_PASSWORD }}" >> $GITHUB_ENV
+            echo "IMAGE_NAME=${{ secrets.REGISTRY_URL }}/${{ env.APP_NAME }}" >> $GITHUB_ENV
+            
+            echo "TF_REG_SERVER=${{ secrets.REGISTRY_URL }}" >> $GITHUB_ENV
+            echo "TF_REG_USER=${{ secrets.REGISTRY_USERNAME }}" >> $GITHUB_ENV
+            echo "TF_REG_PASS=${{ secrets.REGISTRY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            echo "REGISTRY_URL=ghcr.io" >> $GITHUB_ENV
+            echo "REGISTRY_USER=${{ github.actor }}" >> $GITHUB_ENV
+            echo "REGISTRY_PASS=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
+            
+            OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            echo "IMAGE_NAME=ghcr.io/$OWNER/${{ env.APP_NAME }}" >> $GITHUB_ENV
+            
+            echo "TF_REG_SERVER=" >> $GITHUB_ENV
+            echo "TF_REG_USER=" >> $GITHUB_ENV
+            echo "TF_REG_PASS=" >> $GITHUB_ENV
+          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
