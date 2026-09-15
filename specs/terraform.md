@@ -31,7 +31,7 @@ Define and provision the necessary resources within the K3s cluster to run the G
 
 ### 2.5. Service Exposure (Service)
 - A `kubernetes_service` resource will be created to route network traffic to the application instances.
-- **Service Type:** Must be `LoadBalancer` so that K3s can expose it externally (via Klipper Load Balancer), mapping external port `80` to internal container port `8080`.
+- **Service Type:** Must be `ClusterIP` to expose the service internally within the cluster, mapping port `80` to internal container port `8080`.
 
 ## 3. File Structure
 All changes will occur in the `terraform/` directory:
